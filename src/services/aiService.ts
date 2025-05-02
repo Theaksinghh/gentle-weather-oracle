@@ -1,6 +1,6 @@
 
-// This is a mock AI service for generating weather analysis
-// In a real application, this would connect to an AI API like OpenAI
+// Weather service using OpenWeatherMap API
+import { toast } from "@/components/ui/sonner";
 
 export interface WeatherData {
   location: string;
@@ -10,47 +10,67 @@ export interface WeatherData {
   aiAnalysis: string;
 }
 
-// Mock function to determine weather type based on description
-const getWeatherType = (description: string): WeatherData['weatherType'] => {
-  description = description.toLowerCase();
+// Local storage key for the API key
+const API_KEY_STORAGE = 'weather_api_key';
+
+// Save API key to localStorage
+export const saveApiKey = (apiKey: string): void => {
+  localStorage.setItem(API_KEY_STORAGE, apiKey);
+};
+
+// Get API key from localStorage
+export const getApiKey = (): string | null => {
+  return localStorage.getItem(API_KEY_STORAGE);
+};
+
+// Clear API key from localStorage
+export const clearApiKey = (): void => {
+  localStorage.removeItem(API_KEY_STORAGE);
+};
+
+// Map OpenWeatherMap weather codes to our app's weather types
+const mapWeatherType = (weatherCode: string, isNight: boolean): WeatherData['weatherType'] => {
+  const code = weatherCode.toLowerCase();
   
-  if (description.includes('rain') || description.includes('shower')) {
+  if (isNight) {
+    return code.includes('rain') ? 'night-rainy' : 'night';
+  }
+  
+  if (code.includes('rain') || code.includes('drizzle')) {
     return 'rainy';
-  } else if (description.includes('snow') || description.includes('flurries')) {
+  } else if (code.includes('snow')) {
     return 'snowy';
-  } else if (description.includes('cloud')) {
-    return 'cloudy';
-  } else if (description.includes('night') && description.includes('rain')) {
-    return 'night-rainy';
-  } else if (description.includes('night')) {
-    return 'night';
+  } else if (code.includes('thunderstorm')) {
+    return 'stormy';
+  } else if (code.includes('clouds')) {
+    return code.includes('few') ? 'partly-cloudy' : 'cloudy';
   } else {
     return 'sunny';
   }
 };
 
-// Generate mock AI responses based on the weather and location
-const generateAIAnalysis = (location: string, temperature: number, description: string): string => {
-  const tempCategory = temperature < 40 ? 'cold' : temperature < 70 ? 'mild' : 'warm';
+// Generate AI analysis based on weather data
+const generateAIAnalysis = (location: string, tempF: number, description: string): string => {
+  const tempCategory = tempF < 40 ? 'cold' : tempF < 70 ? 'mild' : 'warm';
   const isRainy = description.toLowerCase().includes('rain');
   const isCloudy = description.toLowerCase().includes('cloud');
   const isSnowy = description.toLowerCase().includes('snow');
   
   const analyses = {
     cold: {
-      base: `Current temperature in ${location} is quite cold at ${temperature}°F.`,
+      base: `Current temperature in ${location} is quite cold at ${tempF.toFixed(1)}°F.`,
       rainy: ` The rain is making it feel even colder, so you should definitely wear a waterproof jacket and warm layers.`,
       cloudy: ` The cloud cover is keeping temperatures low, so bundle up if you're heading out.`,
       snowy: ` With snow in the forecast, roads might be slippery. Consider wearing boots with good traction and a warm coat.`
     },
     mild: {
-      base: `The weather in ${location} is comfortable with a current temperature of ${temperature}°F.`,
+      base: `The weather in ${location} is comfortable with a current temperature of ${tempF.toFixed(1)}°F.`,
       rainy: ` Light rain is expected, so carrying an umbrella would be a good idea.`,
       cloudy: ` While it's cloudy, the temperature remains pleasant for outdoor activities.`,
       snowy: ` It's unusual to have snow at this temperature, but be prepared for wet conditions.`
     },
     warm: {
-      base: `It's quite warm in ${location} with temperatures reaching ${temperature}°F.`,
+      base: `It's quite warm in ${location} with temperatures reaching ${tempF.toFixed(1)}°F.`,
       rainy: ` The warm rain might create humid conditions, so dress in light, breathable clothing.`,
       cloudy: ` The clouds are providing some relief from the heat, making it a good day for outdoor activities.`,
       snowy: ` Snow is highly unlikely at this temperature, so this could be a forecasting error.`
@@ -72,27 +92,51 @@ const generateAIAnalysis = (location: string, temperature: number, description: 
   return analysis;
 };
 
-// Mock API call to get weather data
+// OpenWeatherMap API call to get weather data
 export const getWeatherData = async (location: string): Promise<WeatherData> => {
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 1500));
+  const apiKey = getApiKey();
   
-  // Generate random weather data for demo purposes
-  const conditions = [
-    "Sunny", "Partly Cloudy", "Cloudy", "Light Rain", 
-    "Heavy Rain", "Thunderstorms", "Snow", "Clear Night", "Rainy Night"
-  ];
-  const randomCondition = conditions[Math.floor(Math.random() * conditions.length)];
-  const randomTemp = Math.floor(Math.random() * (95 - 30) + 30);
+  if (!apiKey) {
+    throw new Error("API key not found. Please set your OpenWeatherMap API key.");
+  }
   
-  const weatherType = getWeatherType(randomCondition);
-  const aiAnalysis = generateAIAnalysis(location, randomTemp, randomCondition);
-  
-  return {
-    location,
-    temperature: `${randomTemp}°F`,
-    description: randomCondition,
-    weatherType,
-    aiAnalysis
-  };
+  try {
+    const response = await fetch(
+      `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(location)}&appid=${apiKey}&units=imperial`
+    );
+    
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new Error("Invalid API key. Please check your OpenWeatherMap API key.");
+      } else if (response.status === 404) {
+        throw new Error(`Location "${location}" not found. Please check the spelling and try again.`);
+      } else {
+        throw new Error(`Error fetching weather data: ${response.statusText}`);
+      }
+    }
+    
+    const data = await response.json();
+    
+    // Check if it's night time based on sunrise/sunset data
+    const currentTime = Math.floor(Date.now() / 1000);
+    const isNight = currentTime < data.sys.sunrise || currentTime > data.sys.sunset;
+    
+    // Extract and format the data
+    const weatherDescription = data.weather[0].description;
+    const tempF = data.main.temp;
+    const weatherType = mapWeatherType(data.weather[0].main, isNight);
+    const cityWithCountry = `${data.name}, ${data.sys.country}`;
+    const aiAnalysis = generateAIAnalysis(data.name, tempF, weatherDescription);
+    
+    return {
+      location: cityWithCountry,
+      temperature: `${tempF.toFixed(1)}°F`,
+      description: weatherDescription,
+      weatherType,
+      aiAnalysis
+    };
+  } catch (error) {
+    console.error('Error fetching weather data:', error);
+    throw error;
+  }
 };
