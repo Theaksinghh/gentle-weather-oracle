@@ -2,7 +2,7 @@
 import { WeatherData } from './aiService';
 
 const GEMINI_API_KEY = 'AIzaSyCPYF919ZnvQMV0b2jSW7YGdBVJHvljz90';
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent';
 
 // Function to map the AI response to weather type
 const determineWeatherType = (response: string): WeatherData['weatherType'] => {
